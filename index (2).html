@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Karavan Komunita & Cestování</title>
+  
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body, html { height: 100%; width: 100%; overflow: hidden; background: #0f172a; }
+    #map { height: 100%; width: 100%; z-index: 1; }
+
+    /* Horní vyhledávací lišta */
+    .floating-header {
+      position: absolute;
+      top: 14px;
+      left: 14px;
+      right: 14px;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-width: 480px;
+      margin: 0 auto;
+      pointer-events: none;
+    }
+    .interactive-ui { pointer-events: auto; }
+
+    .search-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .menu-btn {
+      width: 46px;
+      height: 46px;
+      background: white;
+      border: none;
+      border-radius: 50%;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.25);
+      font-size: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .search-box {
+      flex: 1;
+      display: flex;
+      background: white;
+      border-radius: 25px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.25);
+      overflow: hidden;
+      padding: 3px 6px 3px 16px;
+      height: 46px;
+      align-items: center;
+    }
+    .search-box input { flex: 1; border: none; font-size: 15px; outline: none; background: transparent; }
+    .search-box button { background: #2563eb; color: white; border: none; border-radius: 50%; width: 34px; height: 34px; cursor: pointer; }
+
+    .search-results {
+      background: white;
+      border-radius: 14px;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+      max-height: 220px;
+      overflow-y: auto;
+      display: none;
+    }
+    .search-item { padding: 12px 16px; border-bottom: 1px solid #f1f5f9; cursor: pointer; font-size: 13px; }
+    .search-item:hover { background: #f8fafc; }
+
+    /* Panel s informacemi o trase */
+    .route-info-card {
+      position: absolute;
+      bottom: 24px;
+      left: 14px;
+      right: 14px;
+      max-width: 420px;
+      margin: 0 auto;
+      z-index: 1000;
+      background: rgba(15, 23, 42, 0.95);
+      color: white;
+      padding: 14px 18px;
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+      display: none;
+      backdrop-filter: blur(8px);
+    }
+    .route-info-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+    .route-details { font-size: 14px; color: #94a3b8; }
+    .route-details strong { color: #38bdf8; font-size: 16px; }
+    .route-actions { display: flex; gap: 8px; margin-top: 10px; }
+
+    /* Plovoucí tlačítko GPS – čistě v pravém dolním rohu */
+    .gps-btn {
+      position: absolute;
+      bottom: 24px;
+      right: 16px;
+      z-index: 999;
+      width: 50px;
+      height: 50px;
+      background: white;
+      border-radius: 50%;
+      border: none;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+      font-size: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: #0284c7;
+    }
+
+    /* Boční nabídka (Menu Drawer) */
+    .side-drawer {
+      position: fixed;
+      top: 0;
+      left: -320px;
+      width: 300px;
+      height: 100%;
+      background: white;
+      z-index: 3000;
+      box-shadow: 5px 0 25px rgba(0,0,0,0.3);
+      transition: left 0.3s ease;
+      display: flex;
+      flex-direction: column;
+      padding: 24px 20px;
+    }
+    .side-drawer.open { left: 0; }
+    .drawer-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .drawer-user-info { background: #f8fafc; padding: 12px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #e2e8f0; }
+    .drawer-menu-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 8px;
+      border-radius: 8px;
+      color: #1e293b;
+      font-size: 15px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .drawer-menu-item:hover { background: #f1f5f9; }
+
+    /* Vrstvy Leaflet vpravo nahoře */
+    .leaflet-top.leaflet-right { top: 75px !important; }
+    .leaflet-control-layers { border-radius: 12px !important; border: none !important; box-shadow: 0 4px 15px rgba(0,0,0,0.2) !important; }
+
+    /* Piny na mapě */
+    .custom-pin { width: 38px !important; height: 48px !important; filter: drop-shadow(0 3px 5px rgba(0,0,0,0.4)); }
+    .pin-wrap { position: relative; width: 38px; height: 48px; }
+    .pin-icon { position: absolute; top: 6px; left: 0; right: 0; text-align: center; font-size: 16px; }
+
+    /* Modály a křížek pro zavření */
+    .overlay {
+      display: none;
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.55);
+      z-index: 2500;
+    }
+    .modal {
+      display: none;
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 2600;
+      background: white;
+      padding: 20px;
+      border-radius: 16px;
+      box-shadow: 0 12px 35px rgba(0,0,0,0.35);
+      width: 92%;
+      max-width: 440px;
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .modal-header h3 { font-size: 18px; color: #0f172a; margin: 0; }
+    .close-modal-btn {
+      background: none;
+      border: none;
+      font-size: 22px;
+      cursor: pointer;
+      color: #64748b;
+      padding: 0 4px;
+      line-height: 1;
+    }
+
+    .modal label { display: block; margin: 10px 0 4px; font-size: 12px; font-weight: bold; color: #475569; }
+    .modal input, .modal select, .modal textarea {
+      width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px;
+    }
+    .modal textarea { min-height: 65px; resize: vertical; }
+
+    .btn { padding: 10px 16px; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; font-size: 13px; }
+    .btn-primary { background: #2563eb; color: white; }
+    .btn-secondary { background: #e2e8f0; color: #334155; }
+    .btn-success { background: #10b981; color: white; }
+    .btn-danger { background: #ef4444; color: white; }
+
+    .photo-preview { width: 100%; height: 130px; object-fit: cover; border-radius: 8px; margin-top: 8px; display: none; }
+    .review-card { background: #f8fafc; border: 1px solid #e2e8f0; padding: 10px; border-radius: 8px; margin-top: 8px; }
+    .gallery { display: flex; gap: 6px; overflow-x: auto; padding: 6px 0; }
+    .gallery img { width: 90px; height: 70px; object-fit: cover; border-radius: 6px; flex-shrink: 0; }
+  </style>
+</head>
+<body>
+
+  <!-- Horní vyhledávání a Menu -->
+  <div class="floating-header">
+    <div class="search-row interactive-ui">
+      <button class="menu-btn" onclick="toggleDrawer(true)">☰</button>
+      <div class="search-box">
+        <input type="text" id="searchInput" placeholder="Hledat adresu, město nebo cíl..." onkeydown="if(event.key==='Enter') searchLocation()">
+        <button onclick="searchLocation()">🔍</button>
+      </div>
+    </div>
+    <div id="searchResults" class="search-results interactive-ui"></div>
+  </div>
+
+  <!-- Karta s aktivní trasou -->
+  <div id="routeInfoCard" class="route-info-card">
+    <div class="route-info-header">
+      <span style="font-weight:bold;font-size:15px;">🚗 Naplánovaná trasa</span>
+      <button onclick="clearRoute()" style="background:none;border:none;color:#94a3b8;font-size:18px;cursor:pointer;">✕</button>
+    </div>
+    <div class="route-details">
+      Vzdálenost: <strong id="routeDistance">0 km</strong> | Čas: <strong id="routeTime">0 min</strong>
+    </div>
+    <div class="route-actions">
+      <a id="extNavBtn" href="#" target="_blank" class="btn btn-success" style="flex:1;text-align:center;text-decoration:none;">🧭 Spustit navigaci</a>
+      <button class="btn btn-secondary" onclick="clearRoute()">Zrušit</button>
+    </div>
+  </div>
+
+  <!-- Tlačítko Zaměřit polohu (bez překrývání) -->
+  <button class="gps-btn" onclick="locateMe()" title="Moje poloha">📍</button>
+
+  <!-- Mapa -->
+  <div id="map"></div>
+  <div id="overlay" class="overlay" onclick="closeAllModals()"></div>
+
+  <!-- Boční panel (Menu Drawer) -->
+  <div id="sideDrawer" class="side-drawer">
+    <div class="drawer-header">
+      <h3 style="font-size:18px;color:#0f172a;">🚐 Karavan Komunita</h3>
+      <button onclick="toggleDrawer(false)" class="close-modal-btn">✕</button>
+    </div>
+
+    <div class="drawer-user-info">
+      <div id="drawerUserStatus" style="font-size:14px;font-weight:600;color:#1e293b;">Nepřihlášený uživatel</div>
+      <small style="color:#64748b;">Přihlášením můžeš ukládat místa a psát recenze.</small>
+    </div>
+
+    <div style="flex:1;display:flex;flex-direction:column;gap:6px;">
+      <div id="authMenuAction" class="drawer-menu-item" onclick="openAuthModal()">
+        <span>🔐</span> <span>Přihlásit se / Registrovat</span>
+      </div>
+      <div class="drawer-menu-item" onclick="loadPointsFromCloud(); toggleDrawer(false);">
+        <span>🔄</span> <span>Aktualizovat uložená místa</span>
+      </div>
+      <div class="drawer-menu-item" onclick="locateMe(); toggleDrawer(false);">
+        <span>📍</span> <span>Zaměřit moji polohu</span>
+      </div>
+    </div>
+
+    <div style="border-top:1px solid #e2e8f0;padding-top:14px;">
+      <small style="color:#94a3b8;display:block;text-align:center;">Karavan Komunita &copy; 2026</small>
+    </div>
+  </div>
+
+  <!-- 1. Modál Přihlášení -->
+  <div id="authModal" class="modal">
+    <div class="modal-header">
+      <h3>🔐 Účet karavanisty</h3>
+      <button class="close-modal-btn" onclick="closeAllModals()">✕</button>
+    </div>
+    <label>E-mail</label>
+    <input type="email" id="authEmail" placeholder="vas@email.cz">
+    <label>Heslo (min. 6 znaků)</label>
+    <input type="password" id="authPassword" placeholder="••••••••">
+    <div style="display:flex;gap:8px;margin-top:16px;">
+      <button class="btn btn-primary" style="flex:1" onclick="handleLogin()">Přihlásit</button>
+      <button class="btn btn-secondary" style="flex:1" onclick="handleRegister()">Registrovat</button>
+    </div>
+  </div>
+
+  <!-- 2. Modál Přidání místa -->
+  <div id="placeModal" class="modal">
+    <div class="modal-header">
+      <h3>🚐 Přidat nové místo</h3>
+      <button class="close-modal-btn" onclick="closeAllModals()">✕</button>
+    </div>
+    <input type="hidden" id="pLat">
+    <input type="hidden" id="pLng">
+
+    <label>Název místa *</label>
+    <input type="text" id="pTitle" placeholder="např. Stellplatz Lipno, Louka u lesa...">
+
+    <label>Viditelnost místa</label>
+    <select id="pPrivacy" style="background:#f8fafc;font-weight:600;">
+      <option value="false">🌐 Veřejné (vidí všichni v komunitě)</option>
+      <option value="true">🔒 Soukromé (vidím pouze já)</option>
+    </select>
+
+    <label>Kategorie</label>
+    <select id="pCategory">
+      <option value="🚐|Stellplatz / Kemp|#3b82f6">🚐 Stellplatz / Kemp</option>
+      <option value="🌲|Spaní na divoko|#10b981">🌲 Spaní na divoko / Příroda</option>
+      <option value="💧|Voda a výlevka|#06b6d4">💧 Pitná voda / Výlevka</option>
+      <option value="⛽|Čerpací stanice / LPG|#f97316">⛽ Benzínka / LPG</option>
+      <option value="📸|Vyhlídka / Cíl cesty|#8b5cf6">📸 Vyhlídka / Výlet</option>
+      <option value="⚠️|Pozor / Nízký podjezd|#ef4444">⚠️ Pozor / Nízký podjezd</option>
+    </select>
+
+    <label>Popis / Poznámky (cena, vjezd, povrch)</label>
+    <textarea id="pDesc" placeholder="Detaily o místě..."></textarea>
+
+    <label>Hlavní fotografie</label>
+    <input type="file" id="pPhoto" accept="image/*" onchange="previewImage(event, 'pPreview')">
+    <img id="pPreview" class="photo-preview" alt="Náhled">
+
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
+      <button class="btn btn-secondary" onclick="closeAllModals()">Zrušit</button>
+      <button class="btn btn-primary" onclick="savePlaceToCloud()">Uložit místo</button>
+    </div>
+  </div>
+
+  <!-- 3. Modál Detail místa & Recenze -->
+  <div id="detailModal" class="modal">
+    <div class="modal-header">
+      <h3 id="dTitle"></h3>
+      <button class="close-modal-btn" onclick="closeAllModals()">✕</button>
+    </div>
+
+    <div id="dCategoryBadge" style="margin-bottom:10px;display:flex;gap:6px;"></div>
+    
+    <div id="dGallery" class="gallery"></div>
+    <p id="dDesc" style="font-size:14px;color:#334155;margin:10px 0;line-height:1.4;"></p>
+    <small id="dAuthor" style="color:#64748b;font-size:11px;display:block;margin-bottom:12px;"></small>
+
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
+      <button id="dPlanRouteBtn" class="btn btn-primary" style="flex:1;">🗺️ Trasa na mapě</button>
+      <a id="dNavBtn" href="#" target="_blank" class="btn btn-success" style="flex:1;text-align:center;text-decoration:none;">🧭 Navigovat</a>
+    </div>
+
+    <div id="ownerActions" style="display:none;margin-bottom:14px;">
+      <button class="btn btn-danger" style="width:100%" onclick="deletePlaceAsOwner()">🗑️ Smazat moje místo</button>
+    </div>
+
+    <hr style="border:none;border-top:1px solid #e2e8f0;margin:14px 0;">
+    <h4 style="font-size:15px;color:#0f172a;margin-bottom:8px;">💬 Komunitní hodnocení & recenze</h4>
+    <div id="reviewsList" style="margin-bottom:14px;"></div>
+
+    <div style="background:#f1f5f9;padding:12px;border-radius:10px;">
+      <h5 style="margin-bottom:6px;font-size:13px;">Přidat recenzi & další foto</h5>
+      <select id="rStars" style="margin-bottom:6px;">
+        <option value="5">⭐⭐⭐⭐⭐ (Super 5/5)</option>
+        <option value="4">⭐⭐⭐⭐ (Velmi dobré 4/5)</option>
+        <option value="3">⭐⭐⭐ (Průměr 3/5)</option>
+        <option value="2">⭐⭐ (Slabé 2/5)</option>
+        <option value="1">⭐ (Nedoporučuji 1/5)</option>
+      </select>
+      <textarea id="rComment" placeholder="Napiš zkušenost, stav vody..."></textarea>
+      <input type="file" id="rPhoto" accept="image/*" style="margin-top:6px;" onchange="previewImage(event, 'rPreview')">
+      <img id="rPreview" class="photo-preview" alt="Náhled recenze">
+      <button class="btn btn-primary" style="width:100%;margin-top:8px;" onclick="submitReview()">Odeslat recenzi</button>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script>
+    // 1. Supabase konfigurace
+    var SUPABASE_URL = "https://cxnpnpdfwpryaqnjxqje.supabase.co";
+    var SUPABASE_KEY = "sb_publishable_0_V8KaoTWJZCpj4BSNPCKw_L8vNceRC";
+    var db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    var currentUser = null;
+    var userCurrentPos = null;
+    var userLocationMarker = null;
+    var places = [];
+    var currentDetailPlace = null;
+    var tempPhotoBase64 = "";
+    var tempReviewPhotoBase64 = "";
+
+    // 2. Mapové podklady (bez ovládacích prvků +- pro čistý roh)
+    var osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' });
+    var satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: 'Tiles &copy; Esri' });
+    var topoLayer = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { maxZoom: 17, attribution: '© OpenTopoMap' });
+
+    var map = L.map('map', { tap: false, layers: [osmLayer], zoomControl: false }).setView([49.8175, 15.4730], 8);
+
+    L.control.layers({
+      "🗺️ Klasická mapa": osmLayer,
+      "🛰️ Letecká / Satelitní": satelliteLayer,
+      "🌲 Turistická / Terénní": topoLayer
+    }, null, { position: 'topright' }).addTo(map);
+
+    var markersLayer = L.layerGroup().addTo(map);
+    var routeLayerGroup = L.layerGroup().addTo(map);
+
+    // 3. Spolehlivé zjištění GPS polohy
+    function locateMe() {
+      if (!navigator.geolocation) {
+        alert("Tvůj prohlížeč nepodporuje zjištění polohy.");
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        function(position) {
+          var lat = position.coords.latitude;
+          var lng = position.coords.longitude;
+          userCurrentPos = { lat: lat, lng: lng };
+
+          if (userLocationMarker) map.removeLayer(userLocationMarker);
+
+          userLocationMarker = L.circleMarker([lat, lng], {
+            radius: 9,
+            fillColor: '#0284c7',
+            color: '#ffffff',
+            weight: 3,
+            fillOpacity: 1
+          }).addTo(map).bindPopup("📍 Tvoje aktuální poloha").openPopup();
+
+          map.setView([lat, lng], 14);
+        },
+        function(error) {
+          console.error("Chyba GPS:", error);
+          if (error.code === 1) alert("Povol prosím přístup k poloze (GPS) v nastavení prohlížeče.");
+          else if (error.code === 2) alert("GPS signál není dostupný.");
+          else alert("Nepodařilo se načíst polohu.");
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      );
+    }
+
+    // 4. Modály a Drawer
+    function toggleDrawer(open) {
+      var drawer = document.getElementById('sideDrawer');
+      var overlay = document.getElementById('overlay');
+      if (open) {
+        drawer.classList.add('open');
+        overlay.style.display = 'block';
+      } else {
+        drawer.classList.remove('open');
+        overlay.style.display = 'none';
+      }
+    }
+
+    function openAuthModal() {
+      toggleDrawer(false);
+      document.getElementById('authModal').style.display = 'block';
+      document.getElementById('overlay').style.display = 'block';
+    }
+
+    function closeAllModals() {
+      document.querySelectorAll('.modal').forEach(function(m) { m.style.display = 'none'; });
+      document.getElementById('overlay').style.display = 'none';
+      document.getElementById('searchResults').style.display = 'none';
+      toggleDrawer(false);
+    }
+
+    // 5. Autentizace
+    function updateUserUI(user) {
+      currentUser = user;
+      var statusEl = document.getElementById('drawerUserStatus');
+      var authItem = document.getElementById('authMenuAction');
+
+      if (user) {
+        statusEl.innerText = "👤 Přihlášen: " + user.email.split('@')[0];
+        authItem.innerHTML = '<span>🚪</span> <span>Odhlásit se</span>';
+        authItem.onclick = function() { db.auth.signOut(); toggleDrawer(false); };
+      } else {
+        statusEl.innerText = "Nepřihlášený uživatel";
+        authItem.innerHTML = '<span>🔐</span> <span>Přihlásit se / Registrovat</span>';
+        authItem.onclick = openAuthModal;
+      }
+      loadPointsFromCloud();
+    }
+
+    async function checkAuth() {
+      var res = await db.auth.getSession();
+      updateUserUI(res.data.session ? res.data.session.user : null);
+      db.auth.onAuthStateChange(function(_event, session) {
+        updateUserUI(session ? session.user : null);
+      });
+    }
+
+    async function handleLogin() {
+      var email = document.getElementById('authEmail').value.trim();
+      var password = document.getElementById('authPassword').value.trim();
+      if (!email || !password) { alert("Zadej e-mail i heslo!"); return; }
+      var res = await db.auth.signInWithPassword({ email: email, password: password });
+      if (res.error) alert("Chyba přihlášení: " + res.error.message);
+      else closeAllModals();
+    }
+
+    async function handleRegister() {
+      var email = document.getElementById('authEmail').value.trim();
+      var password = document.getElementById('authPassword').value.trim();
+      if (!email || !password || password.length < 6) { alert("Zadej e-mail a heslo o délce min. 6 znaků!"); return; }
+      var res = await db.auth.signUp({ email: email, password: password });
+      if (res.error) alert("Chyba registrace: " + res.error.message);
+      else { alert("Účet vytvořen! Nyní se můžeš přihlásit."); closeAllModals(); }
+    }
+
+    // 6. Plánování trasy
+    async function calculateAndDrawRoute(destLat, destLng) {
+      if (!userCurrentPos) {
+        locateMe();
+        alert("Zjišťuji GPS polohu... Až se mapa zaměří, klikni znovu.");
+        return;
+      }
+
+      var startLat = userCurrentPos.lat;
+      var startLng = userCurrentPos.lng;
+      var url = "https://router.project-osrm.org/route/v1/driving/" + startLng + "," + startLat + ";" + destLng + "," + destLat + "?overview=full&geometries=geojson";
+
+      try {
+        var res = await fetch(url);
+        var data = await res.json();
+
+        if (!data.routes || data.routes.length === 0) {
+          alert("Trasu se nepodařilo nalézt.");
+          return;
+        }
+
+        var route = data.routes[0];
+        var distanceKm = (route.distance / 1000).toFixed(1);
+        var durationMin = Math.round(route.duration / 60);
+
+        routeLayerGroup.clearLayers();
+        var routeLine = L.geoJSON(route.geometry, {
+          style: { color: '#2563eb', weight: 6, opacity: 0.85 }
+        }).addTo(routeLayerGroup);
+
+        map.fitBounds(routeLine.getBounds(), { padding: [50, 50] });
+
+        document.getElementById('routeDistance').innerText = distanceKm + " km";
+        document.getElementById('routeTime').innerText = durationMin + " min";
+        document.getElementById('extNavBtn').href = "https://www.google.com/maps/dir/?api=1&destination=" + destLat + "," + destLng;
+        document.getElementById('routeInfoCard').style.display = 'block';
+
+        closeAllModals();
+      } catch (err) {
+        console.error(err);
+        alert("Chyba při výpočtu trasy.");
+      }
+    }
+
+    function clearRoute() {
+      routeLayerGroup.clearLayers();
+      document.getElementById('routeInfoCard').style.display = 'none';
+    }
+
+    // 7. Kliknutí kamkoliv do mapy
+    map.on('click', function(e) {
+      if (document.getElementById('searchResults').style.display === 'block') {
+        document.getElementById('searchResults').style.display = 'none';
+        return;
+      }
+
+      var lat = e.latlng.lat;
+      var lng = e.latlng.lng;
+      var navUrl = "https://www.google.com/maps/dir/?api=1&destination=" + lat + "," + lng;
+
+      var popupContent = document.createElement('div');
+      popupContent.innerHTML = 
+        '<div style="min-width:190px;">' +
+          '<strong style="display:block;font-size:14px;margin-bottom:6px;">📍 Vybrané místo</strong>' +
+          '<button id="btnPlanAny" class="btn btn-primary" style="width:100%;margin-bottom:6px;padding:6px;">🗺️ Trasa z mé polohy</button>' +
+          '<a href="' + navUrl + '" target="_blank" class="btn btn-success" style="display:block;text-align:center;text-decoration:none;padding:6px;margin-bottom:6px;">🧭 Ostrá navigace</a>' +
+          '<button id="btnAddAny" class="btn btn-secondary" style="width:100%;padding:6px;">➕ Přidat nové místo</button>' +
+        '</div>';
+
+      popupContent.querySelector('#btnPlanAny').onclick = function() {
+        calculateAndDrawRoute(lat, lng);
+        map.closePopup();
+      };
+      popupContent.querySelector('#btnAddAny').onclick = function() {
+        openAddPlaceModal(lat, lng);
+        map.closePopup();
+      };
+
+      L.popup().setLatLng(e.latlng).setContent(popupContent).openOn(map);
+    });
+
+    var pressTimer;
+    map.on('mousedown touchstart', function(e) {
+      if (e.originalEvent.touches && e.originalEvent.touches.length > 1) return;
+      pressTimer = setTimeout(function() { openAddPlaceModal(e.latlng.lat, e.latlng.lng); }, 650);
+    });
+    map.on('mouseup touchend dragstart', function() { clearTimeout(pressTimer); });
+
+    // 8. Hledání míst
+    async function searchLocation() {
+      var q = document.getElementById('searchInput').value.trim();
+      var resultsDiv = document.getElementById('searchResults');
+      resultsDiv.innerHTML = "";
+      if (!q) { resultsDiv.style.display = "none"; return; }
+
+      try {
+        var res = await fetch("https://nominatim.openstreetmap.org/search?format=json&q=" + encodeURIComponent(q) + "&limit=4");
+        var placesFound = await res.json();
+
+        if (placesFound.length === 0) {
+          resultsDiv.innerHTML = '<div class="search-item">Místo nenalezeno</div>';
+        } else {
+          placesFound.forEach(function(item) {
+            var row = document.createElement('div');
+            row.className = 'search-item';
+            row.innerHTML = '📍 <strong>' + escapeHtml(item.display_name.split(',')[0]) + '</strong> <small style="color:#64748b;">' + escapeHtml(item.display_name) + '</small>';
+            row.onclick = function() {
+              var targetLat = parseFloat(item.lat);
+              var targetLon = parseFloat(item.lon);
+              map.setView([targetLat, targetLon], 13);
+              resultsDiv.style.display = "none";
+
+              L.popup().setLatLng([targetLat, targetLon])
+                .setContent(
+                  '<div style="min-width:180px;">' +
+                    '<strong>' + escapeHtml(item.display_name.split(',')[0]) + '</strong>' +
+                    '<button onclick="calculateAndDrawRoute(' + targetLat + ',' + targetLon + ')" class="btn btn-primary" style="width:100%;margin-top:6px;padding:6px;">🗺️ Trasa sem</button>' +
+                  '</div>'
+                ).openOn(map);
+            };
+            resultsDiv.appendChild(row);
+          });
+        }
+        resultsDiv.style.display = "block";
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    // 9. Načítání a ukládání bodů (filtrování soukromých)
+    async function loadPointsFromCloud() {
+      var res = await db.from('places').select('*');
+      var rawPlaces = res.data || [];
+
+      // Zobrazí veřejná místa + soukromá pouze autorovi
+      places = rawPlaces.filter(function(pt) {
+        if (!pt.is_private) return true;
+        return currentUser && pt.user_id === currentUser.id;
+      });
+
+      renderMarkers();
+    }
+
+    function renderMarkers() {
+      markersLayer.clearLayers();
+      places.forEach(function(pt) {
+        var parts = pt.category.split('|');
+        var emoji = parts[0], catColor = parts[2] || '#2563eb';
+        if (pt.is_private) emoji = '🔒';
+
+        var pinHtml = '<div class="pin-wrap">' +
+            '<svg width="38" height="48" viewBox="0 0 30 40">' +
+              '<path d="M15 0C6.7 0 0 6.7 0 15c0 10.5 15 25 15 25s15-14.5 15-25c0-8.3-6.7-15-15-15z" fill="' + (pt.is_private ? '#475569' : catColor) + '"/>' +
+              '<circle cx="15" cy="14" r="9" fill="white"/>' +
+            '</svg>' +
+            '<div class="pin-icon">' + emoji + '</div>' +
+          '</div>';
+
+        var customIcon = L.divIcon({ className: 'custom-pin', html: pinHtml, iconSize: [38, 48], iconAnchor: [19, 48] });
+        var marker = L.marker([pt.lat, pt.lng], { icon: customIcon });
+        marker.on('click', function(e) {
+          L.DomEvent.stopPropagation(e);
+          openPlaceDetail(pt);
+        });
+        markersLayer.addLayer(marker);
+      });
+    }
+
+    function openAddPlaceModal(lat, lng) {
+      if (!currentUser) {
+        alert("Pro vytvoření místa se musíš nejprve přihlásit.");
+        openAuthModal();
+        return;
+      }
+      document.getElementById('pLat').value = lat;
+      document.getElementById('pLng').value = lng;
+      document.getElementById('pTitle').value = "";
+      document.getElementById('pPrivacy').value = "false";
+      document.getElementById('pDesc').value = "";
+      document.getElementById('pPhoto').value = "";
+      document.getElementById('pPreview').style.display = "none";
+      tempPhotoBase64 = "";
+
+      document.getElementById('placeModal').style.display = 'block';
+      document.getElementById('overlay').style.display = 'block';
+    }
+
+    async function savePlaceToCloud() {
+      var title = document.getElementById('pTitle').value.trim();
+      if (!title) { alert("Zadej název místa."); return; }
+
+      var isPrivate = document.getElementById('pPrivacy').value === "true";
+
+      var newPlace = {
+        title: title,
+        lat: parseFloat(document.getElementById('pLat').value),
+        lng: parseFloat(document.getElementById('pLng').value),
+        category: document.getElementById('pCategory').value,
+        description: document.getElementById('pDesc').value.trim(),
+        photo: tempPhotoBase64,
+        is_private: isPrivate,
+        user_id: currentUser.id,
+        user_email: currentUser.email
+      };
+
+      var res = await db.from('places').insert([newPlace]);
+      if (res.error) alert("Chyba při ukládání: " + res.error.message);
+      else {
+        closeAllModals();
+        loadPointsFromCloud();
+      }
+    }
+
+    async function openPlaceDetail(place) {
+      currentDetailPlace = place;
+      var parts = place.category.split('|');
+      var emoji = parts[0], catName = parts[1], catColor = parts[2] || '#2563eb';
+
+      document.getElementById('dTitle').innerText = (place.is_private ? '🔒 ' : emoji + ' ') + place.title;
+      
+      var badgeHtml = '<span style="background:' + catColor + ';color:white;padding:2px 8px;border-radius:10px;font-size:12px;font-weight:bold;">' + catName + '</span>';
+      if (place.is_private) {
+        badgeHtml += '<span style="background:#475569;color:white;padding:2px 8px;border-radius:10px;font-size:12px;font-weight:bold;">🔒 Moje soukromé místo</span>';
+      }
+      document.getElementById('dCategoryBadge').innerHTML = badgeHtml;
+      document.getElementById('dDesc').innerText = place.description || "Bez dalšího popisu.";
+      document.getElementById('dAuthor').innerText = "Vložil: " + (place.user_email ? place.user_email.split('@')[0] : 'Uživatel');
+      
+      document.getElementById('dNavBtn').href = "https://www.google.com/maps/dir/?api=1&destination=" + place.lat + "," + place.lng;
+      document.getElementById('dPlanRouteBtn').onclick = function() {
+        calculateAndDrawRoute(place.lat, place.lng);
+      };
+
+      var isOwner = currentUser && currentUser.id === place.user_id;
+      document.getElementById('ownerActions').style.display = isOwner ? 'block' : 'none';
+
+      loadReviewsAndGallery(place);
+      document.getElementById('detailModal').style.display = 'block';
+      document.getElementById('overlay').style.display = 'block';
+    }
+
+    async function loadReviewsAndGallery(place) {
+      var gallery = document.getElementById('dGallery');
+      gallery.innerHTML = "";
+      if (place.photo) gallery.innerHTML += '<img src="' + place.photo + '">';
+
+      var res = await db.from('reviews').select('*').eq('place_id', place.id).order('created_at', { ascending: false });
+      var reviews = res.data;
+
+      var list = document.getElementById('reviewsList');
+      list.innerHTML = "";
+
+      if (!reviews || reviews.length === 0) {
+        list.innerHTML = '<small style="color:#94a3b8;">Zatím žádné recenze. Buď první!</small>';
+      } else {
+        reviews.forEach(function(r) {
+          if (r.photo) gallery.innerHTML += '<img src="' + r.photo + '">';
+          list.innerHTML += 
+            '<div class="review-card">' +
+              '<div style="font-weight:bold;font-size:12px;display:flex;justify-content:space-between;">' +
+                '<span>' + (r.user_email ? r.user_email.split('@')[0] : 'Karavanista') + '</span>' +
+                '<span>' + "⭐".repeat(r.rating) + '</span>' +
+              '</div>' +
+              '<p style="font-size:13px;color:#475569;margin-top:4px;">' + escapeHtml(r.comment || '') + '</p>' +
+            '</div>';
+        });
+      }
+    }
+
+    async function submitReview() {
+      if (!currentUser) { alert("Pro recenzi se přihlas!"); openAuthModal(); return; }
+      var comment = document.getElementById('rComment').value.trim();
+      var rating = parseInt(document.getElementById('rStars').value);
+
+      var res = await db.from('reviews').insert([{
+        place_id: currentDetailPlace.id,
+        user_id: currentUser.id,
+        user_email: currentUser.email,
+        rating: rating,
+        comment: comment,
+        photo: tempReviewPhotoBase64
+      }]);
+
+      if (res.error) alert("Chyba při ukládání: " + res.error.message);
+      else {
+        document.getElementById('rComment').value = "";
+        document.getElementById('rPhoto').value = "";
+        document.getElementById('rPreview').style.display = "none";
+        tempReviewPhotoBase64 = "";
+        loadReviewsAndGallery(currentDetailPlace);
+      }
+    }
+
+    async function deletePlaceAsOwner() {
+      if (!confirm("Opravdu smazat toto místo?")) return;
+      var res = await db.from('places').delete().eq('id', currentDetailPlace.id);
+      if (res.error) alert("Chyba: " + res.error.message);
+      else {
+        closeAllModals();
+        loadPointsFromCloud();
+      }
+    }
+
+    function previewImage(event, previewId) {
+      var file = event.target.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function(e) {
+        var img = new Image();
+        img.onload = function() {
+          var canvas = document.createElement('canvas');
+          var maxDim = 800;
+          var w = img.width, h = img.height;
+          if (w > h && w > maxDim) { h = Math.round((h * maxDim) / w); w = maxDim; }
+          else if (h > maxDim) { w = Math.round((w * maxDim) / h); h = maxDim; }
+          canvas.width = w; canvas.height = h;
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+          var b64 = canvas.toDataURL('image/jpeg', 0.65);
+          if (previewId === 'pPreview') tempPhotoBase64 = b64;
+          else tempReviewPhotoBase64 = b64;
+          var p = document.getElementById(previewId);
+          p.src = b64; p.style.display = 'block';
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function escapeHtml(t) { return (t || '').replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+
+    // Start
+    checkAuth();
+    loadPointsFromCloud();
+  </script>
+</body>
+</html>
